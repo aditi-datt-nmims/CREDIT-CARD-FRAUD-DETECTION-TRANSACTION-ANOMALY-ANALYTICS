@@ -1,11 +1,3 @@
--- ╔══════════════════════════════════════════════════════════════════════════════╗
--- ║  PROJECT 1: CREDIT CARD FRAUD DETECTION & TRANSACTION ANOMALY ANALYTICS   ║
--- ║  Engine: PostgreSQL 16 | Advanced SQL Analytics                           ║
--- ║  Dataset: IEEE-CIS Fraud Detection (Kaggle) - 590,540 Transactions        ║
--- ║  Author: [Your Name]                                                      ║
--- ║  Date: February 2026                                                      ║
--- ╚══════════════════════════════════════════════════════════════════════════════╝
-
 -- ============================================================================
 -- TABLE OF CONTENTS
 -- ============================================================================
@@ -37,6 +29,8 @@
 -- ============================================================================
 
 CREATE SCHEMA IF NOT EXISTS fraud_analytics;
+COPY fact_transactions FROM '/path/to/data.csv'
+WITH (FORMAT csv, HEADER true);
 SET search_path TO fraud_analytics;
 
 -- ────────────────────────────────────────────────────────────────────────────
