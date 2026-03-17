@@ -77,7 +77,7 @@ psql -U postgres -d fraud_analytics -f fraud_detection_complete.sql
 ### Step 3: Load Data
 Choose **ONE** option:
 
-#### From GitHub 
+#### Option A: From GitHub (Recommended)
 ```bash
 # Update GITHUB_CSV_URL in load_fraud_data.py with your repo
 export DB_HOST=localhost
@@ -89,7 +89,7 @@ export DB_PASSWORD=
 python3 load_fraud_data.py --source github
 ```
 
-#### From Local File
+#### Option B: From Local File
 ```bash
 # Download CSV to your machine first (if not already there)
 wget https://raw.githubusercontent.com/AD9319/fraud-detection/main/transactions.csv
@@ -98,7 +98,7 @@ wget https://raw.githubusercontent.com/AD9319/fraud-detection/main/transactions.
 python3 load_fraud_data.py --source local --file transactions.csv
 ```
 
-#### Direct SQL COPY (if CSV is accessible)
+#### Option C: Direct SQL COPY (if CSV is accessible)
 ```sql
 COPY fraud_analytics.stg_raw_transactions FROM '/path/to/transactions.csv'
 WITH (FORMAT csv, HEADER true, DELIMITER ',', ENCODING 'UTF8');
@@ -313,6 +313,33 @@ Use `v_portfolio_fraud_kpi` for executive dashboards and monthly reporting.
 
 ---
 
+## 🛠️ Customization
+
+### Add Your Own Queries
+```sql
+-- Create a view for your specific use case
+CREATE OR REPLACE VIEW v_my_custom_analysis AS
+SELECT 
+    card_id,
+    COUNT(*) as txn_count,
+    SUM(txn_amount) as total_volume
+FROM fact_transactions
+WHERE txn_timestamp >= CURRENT_DATE - INTERVAL '7 days'
+GROUP BY card_id;
+
+-- Query it
+SELECT * FROM v_my_custom_analysis ORDER BY total_volume DESC;
+```
+
+### Refresh Materialized Views
+```sql
+-- Refresh the merchant risk dashboard (no downtime)
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_merchant_risk_dashboard;
+
+-- Schedule with pg_cron (optional)
+-- SELECT cron.schedule('refresh_merchant_dashboard', '15 minutes', 
+--   'REFRESH MATERIALIZED VIEW CONCURRENTLY mv_merchant_risk_dashboard');
+```
 
 ### Adjust Risk Scoring
 Edit the `calculate_transaction_risk_score()` function to change weights:
@@ -321,3 +348,89 @@ Edit the `calculate_transaction_risk_score()` function to change weights:
 v_velocity_score := LEAST(v_velocity_score * 5, 40);
 ```
 
+---
+
+## 🚨 Troubleshooting
+
+### "COPY failed: permission denied"
+**Solution**: Ensure CSV file path is readable by PostgreSQL user
+```bash
+chmod 644 /path/to/transactions.csv
+sudo chown postgres:postgres /path/to/transactions.csv
+```
+
+### "Relation 'dim_cards' does not exist"
+**Solution**: Make sure SQL schema was loaded
+```bash
+psql fraud_analytics -c "\dt fraud_analytics.*"  # Should list tables
+```
+
+### Python loader fails with "No such file"
+**Solution**: Update GITHUB_CSV_URL in `load_fraud_data.py` to your actual repo URL
+
+### Slow queries
+**Solution**: Run `ANALYZE` to update table statistics
+```sql
+ANALYZE fraud_analytics.fact_transactions;
+ANALYZE fraud_analytics.dim_cards;
+ANALYZE fraud_analytics.dim_identity;
+```
+
+---
+
+## 📚 Learning Resources
+
+**PostgreSQL Window Functions**  
+https://www.postgresql.org/docs/16/functions-window.html
+
+**Recursive CTEs**  
+https://www.postgresql.org/docs/16/queries-with.html
+
+**Materialized Views**  
+https://www.postgresql.org/docs/16/rules-materializedviews.html
+
+**Index Types**  
+https://www.postgresql.org/docs/16/indexes-types.html
+
+---
+
+## 📄 License & Attribution
+
+- **Dataset**: IEEE-CIS Fraud Detection (Kaggle) - Public dataset
+- **Schema & Queries**: Original work by Aditi Datt (AD9319)
+- **Use**: Portfolio/Educational purposes
+
+---
+
+## 👤 Author
+
+**Aditi Datt**  
+- GitHub: [@AD9319](https://github.com/AD9319)
+- LinkedIn: [aditidatt](https://linkedin.com/in/aditidatt)
+- Portfolio: Fraud Detection Analytics | SQL | Python | Financial Services
+
+---
+
+## 🎓 Skills Demonstrated
+
+✅ **Advanced SQL**: Window functions, CTEs, stored procedures, materialized views  
+✅ **Database Design**: Star schema, dimensional modeling, indexing strategy  
+✅ **Performance Tuning**: Query optimization, partial/BRIN indexes  
+✅ **Data Engineering**: ETL pipeline, Python data loader, CSV ingestion  
+✅ **Analytics**: Fraud detection, risk scoring, KPI dashboards  
+✅ **Software Engineering**: Error handling, logging, documentation  
+
+---
+
+## 📞 Support
+
+For issues or questions:
+1. Check the **Troubleshooting** section above
+2. Review PostgreSQL documentation
+3. Open an issue on GitHub
+
+---
+
+**Last Updated**: February 2026  
+**PostgreSQL Version**: 16+  
+**Python Version**: 3.8+
