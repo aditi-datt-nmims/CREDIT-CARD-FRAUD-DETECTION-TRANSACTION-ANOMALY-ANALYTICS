@@ -5,79 +5,71 @@ SET search_path TO fraud_analytics;
 
 CREATE TABLE IF NOT EXISTS dim_cards (
     card_id         SERIAL PRIMARY KEY,
-    card_hash       VARCHAR(64) NOT NULL UNIQUE,                   -- Tokenized card number (PCI compliant)
+    card_hash       VARCHAR(64) NOT NULL UNIQUE,                  
     card_type       VARCHAR(20) CHECK (card_type IN 
                         ('credit', 'debit', 'mastercard', 'visa', 'amex', 'unknown')),
-    card_network    VARCHAR(30),                                 -- Visa, Mastercard, Amex, etc.
-    issuing_bank    VARCHAR(100),                                -- Bank that issued the card
-    bin_country     CHAR(2),                                     -- Country from BIN lookup (ISO 3166)
-    enrollment_date DATE,                                        -- When the card was first enrolled
+    card_network    VARCHAR(30),                                 
+    issuing_bank    VARCHAR(100),                                
+    bin_country     CHAR(2),                                     
+    enrollment_date DATE,                                        
     risk_tier       SMALLINT DEFAULT 1 
-                        CHECK (risk_tier BETWEEN 1 AND 5),       -- 1=Low, 5=Critical risk
+                        CHECK (risk_tier BETWEEN 1 AND 5),       
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 
 CREATE TABLE IF NOT EXISTS dim_identity (
     identity_id     SERIAL PRIMARY KEY,
-    device_type     VARCHAR(30),                                 -- mobile, desktop, tablet
-    device_info     VARCHAR(100),                                -- Device model / fingerprint hash
-    ip_address      INET,                                        -- PostgreSQL native IP type
-    email_domain    VARCHAR(100),                                -- Email provider domain
-    browser         VARCHAR(50),                                 -- Chrome, Firefox, Safari, etc.
-    os_type         VARCHAR(50),                                 -- Windows, macOS, Android, iOS
-    screen_res      VARCHAR(20),                                 -- Screen resolution (e.g., 1920x1080)
-    geo_latitude    DECIMAL(9,6),                                -- GPS latitude of transaction
-    geo_longitude   DECIMAL(9,6),                                -- GPS longitude of transaction
-    is_proxy        BOOLEAN DEFAULT FALSE,                       -- Whether IP is a known proxy/VPN
+    device_type     VARCHAR(30),                                 
+    device_info     VARCHAR(100),                                
+    ip_address      INET,                                        
+    email_domain    VARCHAR(100),                                
+    browser         VARCHAR(50),                                 
+    os_type         VARCHAR(50),                                 
+    screen_res      VARCHAR(20),                                 
+    geo_latitude    DECIMAL(9,6),                                
+    geo_longitude   DECIMAL(9,6),                                
+    is_proxy        BOOLEAN DEFAULT FALSE,                       
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(device_info, ip_address, email_domain)               -- Composite unique constraint
+    UNIQUE(device_info, ip_address, email_domain)               
 );
 
 
 CREATE TABLE IF NOT EXISTS fact_transactions (
     txn_id              BIGSERIAL PRIMARY KEY,
-    card_id             INT REFERENCES dim_cards(card_id),       -- FK to card dimension
-    identity_id         INT REFERENCES dim_identity(identity_id),-- FK to identity dimension
-    txn_timestamp       TIMESTAMP NOT NULL,                      -- When the transaction occurred
+    card_id             INT REFERENCES dim_cards(card_id),       
+    identity_id         INT REFERENCES dim_identity(identity_id),
+    txn_timestamp       TIMESTAMP NOT NULL,                      
     txn_amount          DECIMAL(12,2) NOT NULL 
-                            CHECK (txn_amount > 0),              -- Transaction amount in USD
-    product_category    VARCHAR(50),                             -- What was purchased
-    merchant_id         VARCHAR(50),                             -- Unique merchant identifier
-    merchant_category   VARCHAR(50),                             -- MCC (Merchant Category Code) group
-    txn_country         CHAR(2),                                 -- Country where transaction occurred
-    is_fraud            BOOLEAN NOT NULL DEFAULT FALSE,          -- Ground truth label
+                            CHECK (txn_amount > 0),              
+    product_category    VARCHAR(50),                             
+    merchant_id         VARCHAR(50),                             
+    merchant_category   VARCHAR(50),                             
+    txn_country         CHAR(2),                                 
+    is_fraud            BOOLEAN NOT NULL DEFAULT FALSE,          
     fraud_probability   DECIMAL(5,4) CHECK (fraud_probability BETWEEN 0.0000 AND 1.0000),
-    processing_time_ms  INT,                                     -- How long the transaction took to process
+    processing_time_ms  INT,                                     
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 
 
--- Composite index: Most queries filter by card + time range
 CREATE INDEX IF NOT EXISTS idx_txn_card_time 
     ON fact_transactions(card_id, txn_timestamp);
 
--- Partial index: Only index fraud transactions (much smaller, faster scans)
 CREATE INDEX IF NOT EXISTS idx_txn_fraud 
     ON fact_transactions(is_fraud) 
     WHERE is_fraud = TRUE;
 
--- B-tree index: For amount-based range queries and percentile calculations
 CREATE INDEX IF NOT EXISTS idx_txn_amount 
     ON fact_transactions(txn_amount);
 
--- Composite index: For merchant category risk analysis queries
 CREATE INDEX IF NOT EXISTS idx_txn_merchant 
     ON fact_transactions(merchant_category, is_fraud);
 
--- BRIN index: Block Range Index for time-series data
--- BRIN is ~100x smaller than B-tree for sequential/time-ordered data.
--- Perfect for our timestamp column since transactions arrive chronologically.
 CREATE INDEX IF NOT EXISTS idx_txn_timestamp 
     ON fact_transactions USING BRIN(txn_timestamp);
 
--- Index for identity-based fraud detection (same device across multiple cards)
 CREATE INDEX IF NOT EXISTS idx_txn_identity
     ON fact_transactions(identity_id, is_fraud);
 
@@ -116,8 +108,8 @@ SELECT DISTINCT
     COALESCE(LOWER(stg.CardType), 'unknown')::VARCHAR(20),
     stg.CardNetwork,
     stg.IssuingBank,
-    stg.TransactionCountry,  -- Use transaction country as proxy for BIN country
-    1  -- Default risk tier, can be updated later based on fraud patterns
+    stg.TransactionCountry,  
+    1  
 FROM stg_raw_transactions stg
 ON CONFLICT (card_hash) DO NOTHING;
 
@@ -162,7 +154,6 @@ INNER JOIN dim_identity di ON stg.DeviceHash = di.device_info
 ON CONFLICT DO NOTHING;
 
 
--- Check total record counts
 SELECT 
     'Total Transactions Loaded' AS metric,
     COUNT(*) AS count
@@ -183,7 +174,6 @@ SELECT
     ROUND(COUNT(*) FILTER (WHERE is_fraud = TRUE)::DECIMAL / COUNT(*) * 100, 3)
 FROM fact_transactions;
 
--- Validate data types and constraints
 SELECT 
     'NULL check: txn_amount' AS validation,
     COUNT(*) AS null_count
@@ -211,23 +201,23 @@ WITH card_velocity AS (
         txn_timestamp,
         txn_amount,
         is_fraud,
-        -- Count transactions in a 1-hour rolling window
+
         COUNT(*) OVER (
             PARTITION BY card_id 
             ORDER BY txn_timestamp 
             RANGE BETWEEN INTERVAL '1 hour' PRECEDING AND CURRENT ROW
         ) AS txn_count_1h,
-        -- Sum amount in a 1-hour rolling window
+
         SUM(txn_amount) OVER (
             PARTITION BY card_id 
             ORDER BY txn_timestamp 
             RANGE BETWEEN INTERVAL '1 hour' PRECEDING AND CURRENT ROW
         ) AS txn_sum_1h,
-        -- Time since last transaction
+
         EXTRACT(EPOCH FROM txn_timestamp - LAG(txn_timestamp) OVER (
             PARTITION BY card_id ORDER BY txn_timestamp
         )) / 60.0 AS minutes_since_last_txn,
-        -- Percentile rank of amount for this card
+
         PERCENT_RANK() OVER (
             PARTITION BY card_id 
             ORDER BY txn_amount
@@ -238,7 +228,7 @@ WITH card_velocity AS (
 velocity_scored AS (
     SELECT
         *,
-        -- Composite velocity score
+
         CASE
             WHEN txn_count_1h >= 5 AND txn_sum_1h > 5000 THEN 'CRITICAL'
             WHEN txn_count_1h >= 3 AND txn_sum_1h > 2500 THEN 'HIGH'
@@ -267,7 +257,7 @@ ORDER BY txn_timestamp DESC;
 
 CREATE OR REPLACE VIEW v_fraud_rings AS
 WITH RECURSIVE fraud_chain AS (
-    -- Base case: Known fraud transactions
+
     SELECT
         t.card_id,
         t.identity_id,
@@ -300,7 +290,7 @@ WITH RECURSIVE fraud_chain AS (
         fc.chain_depth + 1
     FROM fraud_chain fc
     INNER JOIN fact_transactions t ON (
-        -- Connect if they share IP address OR email domain OR device
+
         (t.identity_id IN (
             SELECT identity_id FROM dim_identity 
             WHERE ip_address = fc.ip_address
@@ -359,7 +349,7 @@ DECLARE
     v_card_countries INT;
     v_device_fraud_rate DECIMAL;
 BEGIN
-    -- VELOCITY COMPONENT: Recent transaction count for this card
+
     SELECT COUNT(*) INTO v_velocity_score
     FROM fact_transactions
     WHERE card_id = p_card_id
@@ -367,7 +357,7 @@ BEGIN
     
     v_velocity_score := LEAST(v_velocity_score * 5, 30);  -- Cap at 30
     
-    -- AMOUNT COMPONENT: Is this amount an outlier for this card?
+
     SELECT AVG(txn_amount), STDDEV(txn_amount) INTO v_card_avg_amount, v_card_stddev
     FROM fact_transactions
     WHERE card_id = p_card_id
@@ -379,7 +369,7 @@ BEGIN
         v_amount_score := 10;  -- 2x average
     END IF;
     
-    -- MERCHANT COMPONENT: What's the fraud rate for this merchant?
+
     SELECT ROUND(COUNT(*) FILTER (WHERE is_fraud = TRUE)::DECIMAL / 
                  COUNT(*) * 100, 2) INTO v_merchant_fraud_rate
     FROM fact_transactions
@@ -388,7 +378,7 @@ BEGIN
     
     v_merchant_score := LEAST(ROUND(COALESCE(v_merchant_fraud_rate, 0))::INT, 15);
     
-    -- GEOGRAPHIC COMPONENT: Is card being used in new countries?
+
     SELECT COUNT(DISTINCT txn_country) INTO v_card_countries
     FROM fact_transactions
     WHERE card_id = p_card_id;
@@ -400,7 +390,7 @@ BEGIN
         v_geographic_score := 15;  -- New country: max points
     END IF;
     
-    -- DEVICE COMPONENT: Fraud rate for this device
+
     SELECT ROUND(COUNT(*) FILTER (WHERE is_fraud = TRUE)::DECIMAL / 
                  COUNT(*) * 100, 2) INTO v_device_fraud_rate
     FROM fact_transactions
@@ -409,11 +399,11 @@ BEGIN
     
     v_device_score := LEAST(ROUND(COALESCE(v_device_fraud_rate, 0))::INT, 10);
     
-    -- TOTAL SCORE
+
     v_total_score := v_base_score + v_velocity_score + v_amount_score + 
                      v_merchant_score + v_geographic_score + v_device_score;
     
-    -- Ensure score is between 10 and 100
+
     v_total_score := GREATEST(10, LEAST(v_total_score, 100));
     
     RETURN QUERY SELECT
@@ -466,17 +456,17 @@ ranked AS (
 )
 SELECT
     *,
-    -- Final risk tier assignment using multiple criteria
+
     CASE
         WHEN fraud_rate_decile >= 0.9 
-             AND fraud_rate_zscore > 2.0 THEN 'CRITICAL_RISK'       -- Top decile AND statistical outlier
-        WHEN fraud_rate_decile >= 0.8 THEN 'HIGH_RISK'              -- Top 20% fraud rate
-        WHEN fraud_rate_decile >= 0.6 THEN 'ELEVATED'               -- Above median fraud rate
+             AND fraud_rate_zscore > 2.0 THEN 'CRITICAL_RISK'       
+        WHEN fraud_rate_decile >= 0.8 THEN 'HIGH_RISK'              
+        WHEN fraud_rate_decile >= 0.6 THEN 'ELEVATED'               
         ELSE 'NORMAL'
     END AS merchant_risk_tier
 FROM ranked;
 
--- Unique index enables CONCURRENTLY refresh (no locks during refresh)
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_merchant 
     ON mv_merchant_risk_dashboard(merchant_id);
 
@@ -502,10 +492,10 @@ SELECT
     ROUND(AVG(CASE WHEN EXTRACT(DOW FROM txn_timestamp) = 6
         THEN CASE WHEN is_fraud THEN 1.0 ELSE 0.0 END END) * 100, 2) AS sat_fraud_pct,
 
-    -- Overall fraud rate for this hour (across all days)
+
     ROUND(AVG(CASE WHEN is_fraud THEN 1.0 ELSE 0.0 END) * 100, 2) AS overall_fraud_pct,
 
-    -- Total transaction volume per hour (context for the rates above)
+
     COUNT(*) AS total_transactions
 
 FROM fact_transactions
@@ -547,7 +537,7 @@ SELECT
     daily_txns,
     daily_fraud,
     daily_fraud_rate,
-    -- 7-day moving average smooths daily volatility
+
     ROUND(AVG(daily_fraud_rate) OVER (
         ORDER BY txn_date
         ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
