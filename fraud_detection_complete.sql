@@ -1,64 +1,8 @@
--- ╔══════════════════════════════════════════════════════════════════════════════╗
--- ║  CREDIT CARD FRAUD DETECTION & TRANSACTION ANOMALY ANALYTICS               ║
--- ║  Engine: PostgreSQL 16+ | Advanced SQL Analytics                           ║
--- ║  Dataset: IEEE-CIS Fraud Detection (Kaggle) - 590,540 Transactions        ║
--- ║  Author: Aditi Datt (AD9319)                                               ║
--- ║  GitHub: https://github.com/AD9319/fraud-detection                         ║
--- ║  Date: February 2026                                                       ║
--- ║  Portfolio Project: Financial Services Analytics                           ║
--- ╚══════════════════════════════════════════════════════════════════════════════╝
-
--- ============================================================================
--- TABLE OF CONTENTS
--- ============================================================================
--- 1. DATABASE SCHEMA DESIGN (Star Schema)
---    1.1 Drop existing schema (fresh start)
---    1.2 dim_cards         - Card dimension table
---    1.3 dim_identity      - Device & identity fingerprint dimension
---    1.4 fact_transactions  - Core transaction fact table
---    1.5 Performance Indexes
---
--- 2. DATA INGESTION SECTION
---    2.1 Create staging table for raw CSV data
---    2.2 Load raw data from CSV
---    2.3 Transform & populate dimension tables
---    2.4 Populate fact table
---    2.5 Data quality validation
---
--- 3. ADVANCED ANALYTICAL QUERIES
---    3.1 Multi-Window Transaction Velocity & Burst Detection
---    3.2 Recursive CTE: Fraud Chain & Cascading Fraud Detection
---    3.3 Stored Procedure: Dynamic Risk Scoring Engine
---    3.4 Materialized View: Real-Time Merchant Risk Dashboard
---    3.5 Dynamic Pivot: Time-Series Fraud Heatmap
---
--- 4. UTILITY QUERIES
---    4.1 Portfolio-Level Fraud KPI Summary
---    4.2 Rolling 7-Day Fraud Trend
---    4.3 Card-Level Risk Profile
--- ============================================================================
-
-
--- ============================================================================
--- SECTION 1: DATABASE SCHEMA DESIGN
--- Architecture: Star Schema optimized for OLAP analytical workloads
--- The fact table (transactions) sits at the center, with dimension tables
--- for cards and identity/device information branching out.
--- ============================================================================
-
--- 1.1 DROP EXISTING SCHEMA (FRESH START)
--- Uncomment if you want to start fresh
--- DROP SCHEMA IF EXISTS fraud_analytics CASCADE;
+/* Creating the schema */
 
 CREATE SCHEMA IF NOT EXISTS fraud_analytics;
 SET search_path TO fraud_analytics;
 
--- ────────────────────────────────────────────────────────────────────────────
--- 1.2 DIMENSION TABLE: Card Information
--- Stores static card attributes. Each card has a unique hash, type,
--- issuing bank, and a dynamic risk_tier that can be updated as new
--- fraud intelligence becomes available.
--- ────────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS dim_cards (
     card_id         SERIAL PRIMARY KEY,
     card_hash       VARCHAR(64) NOT NULL UNIQUE,                   -- Tokenized card number (PCI compliant)
@@ -73,12 +17,7 @@ CREATE TABLE IF NOT EXISTS dim_cards (
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- ────────────────────────────────────────────────────────────────────────────
--- 1.3 DIMENSION TABLE: Device & Identity Fingerprints
--- Captures the digital footprint of each transaction session.
--- Device fingerprinting is a key fraud signal — the same device used
--- across multiple stolen cards is a strong indicator of organized fraud.
--- ────────────────────────────────────────────────────────────────────────────
+
 CREATE TABLE IF NOT EXISTS dim_identity (
     identity_id     SERIAL PRIMARY KEY,
     device_type     VARCHAR(30),                                 -- mobile, desktop, tablet
@@ -95,12 +34,7 @@ CREATE TABLE IF NOT EXISTS dim_identity (
     UNIQUE(device_info, ip_address, email_domain)               -- Composite unique constraint
 );
 
--- ────────────────────────────────────────────────────────────────────────────
--- 1.4 FACT TABLE: Transactions
--- The core analytical table. Every row represents one transaction event.
--- This table is designed for high-volume analytical queries with 
--- appropriate data types and constraints for data integrity.
--- ────────────────────────────────────────────────────────────────────────────
+
 CREATE TABLE IF NOT EXISTS fact_transactions (
     txn_id              BIGSERIAL PRIMARY KEY,
     card_id             INT REFERENCES dim_cards(card_id),       -- FK to card dimension
@@ -118,11 +52,7 @@ CREATE TABLE IF NOT EXISTS fact_transactions (
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- ────────────────────────────────────────────────────────────────────────────
--- 1.5 PERFORMANCE INDEXES
--- Strategic indexing is critical for sub-second query performance on
--- large datasets. Each index targets a specific query pattern.
--- ────────────────────────────────────────────────────────────────────────────
+
 
 -- Composite index: Most queries filter by card + time range
 CREATE INDEX IF NOT EXISTS idx_txn_card_time 
@@ -152,16 +82,6 @@ CREATE INDEX IF NOT EXISTS idx_txn_identity
     ON fact_transactions(identity_id, is_fraud);
 
 
--- ============================================================================
--- SECTION 2: DATA INGESTION & TRANSFORMATION
--- This section handles loading raw CSV data from your GitHub repo
--- and populating the star schema with clean, normalized data
--- ============================================================================
-
--- ────────────────────────────────────────────────────────────────────────────
--- 2.1 CREATE STAGING TABLE FOR RAW CSV DATA
--- This temporary table will hold data exactly as it appears in the CSV
--- ────────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS stg_raw_transactions (
     TransactionID           BIGINT,
     TransactionTime         TIMESTAMP,
@@ -189,41 +109,7 @@ CREATE TABLE IF NOT EXISTS stg_raw_transactions (
     ProcessingTime          INT
 );
 
--- ────────────────────────────────────────────────────────────────────────────
--- 2.2 LOAD RAW DATA FROM CSV
--- OPTION A: Load from local file path
--- OPTION B: Load from GitHub raw CSV URL (via external data wrapper)
--- ────────────────────────────────────────────────────────────────────────────
 
--- OPTION A: LOAD FROM LOCAL FILE (Uncomment if CSV is on your machine)
--- COPY stg_raw_transactions FROM '/path/to/your/transactions.csv'
---     WITH (FORMAT csv, HEADER true, DELIMITER ',', ENCODING 'UTF8');
-
--- OPTION B: LOAD FROM GITHUB (Recommended for portfolio projects)
--- First, create a wrapper to fetch from GitHub, then parse the CSV
--- You can download the CSV and reference it locally, or use this approach:
-
--- Example: If your GitHub repo has the CSV at:
--- https://raw.githubusercontent.com/AD9319/fraud-detection/main/transactions.csv
-
--- For PostgreSQL, you can:
--- 1. Download manually: wget https://raw.githubusercontent.com/AD9319/fraud-detection/main/transactions.csv
--- 2. Then load with:
--- COPY stg_raw_transactions FROM '/path/to/downloaded/transactions.csv'
---     WITH (FORMAT csv, HEADER true, DELIMITER ',', ENCODING 'UTF8');
-
--- OR use a Python script (psycopg2) to load from URL directly
--- See section below for Python loader script
-
--- ────────────────────────────────────────────────────────────────────────────
--- 2.3 POPULATE DIMENSION TABLES (CARDS)
--- Extract unique cards from staging table and insert into dim_cards
--- ────────────────────────────────────────────────────────────────────────────
-
--- Check if data exists before transforming
--- SELECT COUNT(*) as staging_record_count FROM stg_raw_transactions;
-
--- Populate dim_cards from unique card records
 INSERT INTO dim_cards (card_hash, card_type, card_network, issuing_bank, bin_country, risk_tier)
 SELECT DISTINCT
     stg.CardHash,
@@ -235,10 +121,6 @@ SELECT DISTINCT
 FROM stg_raw_transactions stg
 ON CONFLICT (card_hash) DO NOTHING;
 
--- ────────────────────────────────────────────────────────────────────────────
--- 2.4 POPULATE DIMENSION TABLES (IDENTITY/DEVICE)
--- Extract unique device fingerprints from staging table
--- ────────────────────────────────────────────────────────────────────────────
 
 INSERT INTO dim_identity (device_type, device_info, ip_address, email_domain, 
                           browser, os_type, screen_res, geo_latitude, geo_longitude, is_proxy)
@@ -256,10 +138,6 @@ SELECT DISTINCT
 FROM stg_raw_transactions stg
 ON CONFLICT (device_info, ip_address, email_domain) DO NOTHING;
 
--- ────────────────────────────────────────────────────────────────────────────
--- 2.5 POPULATE FACT TABLE (TRANSACTIONS)
--- Join staging data with dimension tables and insert into fact_transactions
--- ────────────────────────────────────────────────────────────────────────────
 
 INSERT INTO fact_transactions 
     (card_id, identity_id, txn_timestamp, txn_amount, product_category, 
@@ -283,10 +161,6 @@ INNER JOIN dim_identity di ON stg.DeviceHash = di.device_info
                               AND stg.EmailDomain = di.email_domain
 ON CONFLICT DO NOTHING;
 
--- ────────────────────────────────────────────────────────────────────────────
--- 2.6 DATA QUALITY VALIDATION
--- Verify data integrity after load
--- ────────────────────────────────────────────────────────────────────────────
 
 -- Check total record counts
 SELECT 
@@ -328,31 +202,6 @@ SELECT
 FROM fact_transactions
 WHERE is_fraud IS NULL;
 
-
--- ============================================================================
--- SECTION 3: ADVANCED ANALYTICAL QUERIES
--- Enterprise-grade fraud detection using advanced SQL techniques
--- ============================================================================
-
--- ────────────────────────────────────────────────────────────────────────────
--- 3.1 MULTI-WINDOW TRANSACTION VELOCITY & BURST DETECTION
--- ────────────────────────────────────────────────────────────────────────────
--- PURPOSE: Detect accounts exhibiting abnormal transaction frequency or
---          spending patterns compared to their historical baseline.
---
--- TECHNIQUES USED:
---   • Multiple window functions with different frame specifications
---   • RANGE frame (time-based) vs ROWS frame (count-based)
---   • LAG() for inter-transaction timing
---   • PERCENT_RANK() for statistical percentile positioning
---   • Composite scoring with CASE expressions
---
--- WHY THIS MATTERS:
---   Fraudsters often "test" stolen cards with small transactions, then 
---   rapidly make large purchases. This query detects that burst pattern.
---   JP Morgan's real-time fraud monitoring system uses similar velocity
---   analysis on 2.5+ billion daily transactions.
--- ────────────────────────────────────────────────────────────────────────────
 
 CREATE OR REPLACE VIEW v_velocity_anomalies AS
 WITH card_velocity AS (
@@ -414,25 +263,7 @@ FROM velocity_scored
 WHERE velocity_risk_tier IN ('CRITICAL', 'HIGH', 'MEDIUM')
 ORDER BY txn_timestamp DESC;
 
--- View detail: Shows top velocity anomalies
--- SELECT * FROM v_velocity_anomalies LIMIT 50;
 
-
--- ────────────────────────────────────────────────────────────────────────────
--- 3.2 RECURSIVE CTE: FRAUD CHAIN & CASCADING FRAUD DETECTION
--- ────────────────────────────────────────────────────────────────────────────
--- PURPOSE: Detect fraud rings by identifying cards/devices connected through
---          shared attributes (same IP, same email, same device fingerprint).
---
--- HOW IT WORKS:
---   A single fraudulent transaction can expose an entire fraud ring if we
---   follow the chain of connected accounts. This recursive CTE starts with
---   known fraud cases and recursively finds all connected cards.
---
--- BUSINESS IMPACT:
---   One fraudster caught → Identify all 8-12 cloned cards they're using
---   Prevents cascading fraud losses
--- ────────────────────────────────────────────────────────────────────────────
 
 CREATE OR REPLACE VIEW v_fraud_rings AS
 WITH RECURSIVE fraud_chain AS (
@@ -455,7 +286,7 @@ WITH RECURSIVE fraud_chain AS (
     
     UNION ALL
     
-    -- Recursive case: Find cards connected through shared attributes
+
     SELECT
         t.card_id,
         t.identity_id,
@@ -495,25 +326,7 @@ FROM fraud_chain
 GROUP BY card_chain[1]
 ORDER BY connected_cards_count DESC;
 
--- View detail: Shows fraud rings and connected accounts
--- SELECT * FROM v_fraud_rings;
 
-
--- ────────────────────────────────────────────────────────────────────────────
--- 3.3 STORED PROCEDURE: DYNAMIC RISK SCORING ENGINE
--- ────────────────────────────────────────────────────────────────────────────
--- PURPOSE: Calculate comprehensive risk scores for transactions in real-time
---          using multiple signals (velocity, amount, merchant, geography, etc.)
---
--- SCORING MODEL:
---   Base Score = 10 points
---   + Velocity Risk: 0-30 points
---   + Amount Outlier: 0-20 points
---   + Merchant Risk: 0-15 points
---   + Geographic Risk: 0-15 points
---   + Device Risk: 0-10 points
---   Final Score: 10-100 (>70 = BLOCK, 50-70 = CHALLENGE, <50 = ALLOW)
--- ────────────────────────────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION calculate_transaction_risk_score(
     p_card_id INT,
@@ -623,21 +436,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
--- Usage example:
--- SELECT * FROM calculate_transaction_risk_score(1, 1, 150.00, 'Electronics', 'US');
 
-
--- ────────────────────────────────────────────────────────────────────────────
--- 3.4 MATERIALIZED VIEW: REAL-TIME MERCHANT RISK DASHBOARD
--- ────────────────────────────────────────────────────────────────────────────
--- PURPOSE: Identify high-risk merchants that are disproportionately targeted
---          by fraudsters. This dashboard enables risk-based pricing and
---          enhanced monitoring.
---
--- BUSINESS CONTEXT:
---   Some merchant categories (dating apps, gift cards, crypto) have 5-10x
---   higher fraud rates. Flagging these enables targeted defenses.
--- ────────────────────────────────────────────────────────────────────────────
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_merchant_risk_dashboard AS
 WITH merchant_stats AS (
@@ -681,27 +480,7 @@ FROM ranked;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_merchant 
     ON mv_merchant_risk_dashboard(merchant_id);
 
--- To refresh (run via pg_cron or application scheduler every 15 min):
--- REFRESH MATERIALIZED VIEW CONCURRENTLY mv_merchant_risk_dashboard;
 
-
--- ────────────────────────────────────────────────────────────────────────────
--- 3.5 DYNAMIC PIVOT: TIME-SERIES FRAUD HEATMAP
--- ────────────────────────────────────────────────────────────────────────────
--- PURPOSE: Generate a fraud rate heatmap by hour-of-day × day-of-week.
---          Reveals temporal patterns (e.g., fraud spikes at 3 AM on weekends).
---
--- TECHNIQUES USED:
---   • Conditional aggregation to pivot rows into columns
---   • EXTRACT() for temporal decomposition
---   • Cross-tab pattern without CROSSTAB extension
---
--- BUSINESS CONTEXT:
---   This heatmap is used for:
---   1. Fraud rule engine tuning (tighter thresholds during high-risk hours)
---   2. Analyst shift scheduling (more analysts during peak fraud windows)
---   3. Card blocking policies (auto-block transactions at 3 AM for certain cards)
--- ────────────────────────────────────────────────────────────────────────────
 
 CREATE OR REPLACE VIEW v_fraud_temporal_heatmap AS
 SELECT
@@ -735,15 +514,6 @@ GROUP BY EXTRACT(HOUR FROM txn_timestamp)
 ORDER BY hour_of_day;
 
 
--- ============================================================================
--- SECTION 4: UTILITY QUERIES & DASHBOARDS
--- ============================================================================
-
--- ────────────────────────────────────────────────────────────────────────────
--- 4.1 PORTFOLIO-LEVEL FRAUD KPI SUMMARY
--- Quick executive dashboard: key fraud metrics at a glance
--- ────────────────────────────────────────────────────────────────────────────
-
 CREATE OR REPLACE VIEW v_portfolio_fraud_kpi AS
 SELECT
     COUNT(*) AS total_transactions,
@@ -760,11 +530,6 @@ SELECT
 FROM fact_transactions
 WHERE txn_timestamp >= CURRENT_DATE - INTERVAL '30 days';
 
-
--- ────────────────────────────────────────────────────────────────────────────
--- 4.2 ROLLING 7-DAY FRAUD TREND
--- Daily fraud metrics with 7-day moving average for trend analysis
--- ────────────────────────────────────────────────────────────────────────────
 
 CREATE OR REPLACE VIEW v_fraud_7day_trend AS
 WITH daily AS (
@@ -795,12 +560,6 @@ FROM daily
 ORDER BY txn_date DESC;
 
 
--- ────────────────────────────────────────────────────────────────────────────
--- 4.3 CARD-LEVEL RISK PROFILE
--- Generate a comprehensive risk profile for any individual card
--- Useful for fraud investigation and customer service teams
--- ────────────────────────────────────────────────────────────────────────────
-
 CREATE OR REPLACE VIEW v_card_risk_profile AS
 SELECT
     c.card_id,
@@ -826,165 +585,3 @@ LEFT JOIN fact_transactions t ON c.card_id = t.card_id
 GROUP BY c.card_id, c.card_hash, c.card_type, c.card_network, 
          c.issuing_bank, c.bin_country, c.risk_tier
 ORDER BY fraud_txns DESC;
-
-
--- ============================================================================
--- SECTION 5: PYTHON DATA LOADER SCRIPT
--- Use this to load CSV data from GitHub directly into PostgreSQL
--- ============================================================================
-
--- Python script (copy below into a file: `load_fraud_data.py`)
--- 
--- #!/usr/bin/env python3
--- """
--- Load IEEE-CIS Fraud Detection CSV from GitHub into PostgreSQL
--- Usage: python3 load_fraud_data.py
--- """
--- 
--- import psycopg2
--- import pandas as pd
--- import io
--- import requests
--- from dotenv import load_dotenv
--- import os
--- 
--- load_dotenv()
--- 
--- # GitHub raw CSV URL
--- GITHUB_CSV_URL = "https://raw.githubusercontent.com/AD9319/fraud-detection/main/transactions.csv"
--- 
--- # Database connection parameters
--- DB_CONFIG = {
---     "host": os.getenv("DB_HOST", "localhost"),
---     "port": os.getenv("DB_PORT", "5432"),
---     "database": os.getenv("DB_NAME", "fraud_analytics"),
---     "user": os.getenv("DB_USER", "postgres"),
---     "password": os.getenv("DB_PASSWORD", ""),
--- }
--- 
--- def load_csv_from_github():
---     """Download CSV from GitHub and load into PostgreSQL"""
---     try:
---         print(f"📥 Downloading CSV from {GITHUB_CSV_URL}...")
---         response = requests.get(GITHUB_CSV_URL)
---         response.raise_for_status()
---         
---         # Read CSV into pandas
---         df = pd.read_csv(io.StringIO(response.text))
---         print(f"✅ Downloaded {len(df)} records")
---         
---         # Connect to PostgreSQL
---         conn = psycopg2.connect(**DB_CONFIG)
---         cursor = conn.cursor()
---         
---         # Clear staging table
---         cursor.execute("DELETE FROM fraud_analytics.stg_raw_transactions;")
---         
---         # Insert data using executemany for efficiency
---         insert_query = """
---             INSERT INTO fraud_analytics.stg_raw_transactions VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
---         """
---         
---         rows = [tuple(row) for row in df.values]
---         cursor.executemany(insert_query, rows)
---         conn.commit()
---         
---         print(f"✅ Inserted {cursor.rowcount} records into stg_raw_transactions")
---         
---         # Transform and populate dimension/fact tables
---         cursor.execute("""
---             INSERT INTO fraud_analytics.dim_cards (card_hash, card_type, card_network, issuing_bank, bin_country)
---             SELECT DISTINCT CardHash, CardType, CardNetwork, IssuingBank, TransactionCountry
---             FROM fraud_analytics.stg_raw_transactions
---             ON CONFLICT (card_hash) DO NOTHING;
---         """)
---         
---         cursor.execute("""
---             INSERT INTO fraud_analytics.dim_identity (device_type, device_info, ip_address, email_domain, browser, os_type)
---             SELECT DISTINCT DeviceType, DeviceHash, IPAddress::INET, EmailDomain, Browser, OSType
---             FROM fraud_analytics.stg_raw_transactions
---             ON CONFLICT (device_info, ip_address, email_domain) DO NOTHING;
---         """)
---         
---         cursor.execute("""
---             INSERT INTO fraud_analytics.fact_transactions (card_id, identity_id, txn_timestamp, txn_amount, merchant_category, is_fraud)
---             SELECT dc.card_id, di.identity_id, stg.TransactionTime, stg.TransactionAmount, stg.MerchantCategory, stg.IsFraud
---             FROM fraud_analytics.stg_raw_transactions stg
---             JOIN fraud_analytics.dim_cards dc ON stg.CardHash = dc.card_hash
---             JOIN fraud_analytics.dim_identity di ON stg.DeviceHash = di.device_info;
---         """)
---         
---         conn.commit()
---         print("✅ Data transformation complete!")
---         
---         cursor.close()
---         conn.close()
---         
---     except Exception as e:
---         print(f"❌ Error: {e}")
---         raise
--- 
--- if __name__ == "__main__":
---     load_csv_from_github()
-
-
--- ============================================================================
--- HOW TO RUN THIS PROJECT (COMPLETE SETUP GUIDE)
--- ============================================================================
-
--- STEP 1: CREATE DATABASE
--- createdb fraud_analytics
--- psql fraud_analytics < fraud_detection_complete.sql
-
--- STEP 2: LOAD DATA (Choose one option)
--- Option A: Direct file load (if CSV is on your machine)
---   COPY stg_raw_transactions FROM '/path/to/transactions.csv'
---   WITH (FORMAT csv, HEADER true, DELIMITER ',', ENCODING 'UTF8');
-
--- Option B: From GitHub using Python script
---   pip install psycopg2 pandas requests python-dotenv
---   python3 load_fraud_data.py
-
--- Option C: Download first, then load
---   wget https://raw.githubusercontent.com/AD9319/fraud-detection/main/transactions.csv
---   psql fraud_analytics -c "COPY stg_raw_transactions FROM 'transactions.csv' WITH (FORMAT csv, HEADER true);"
-
--- STEP 3: VERIFY DATA
--- SELECT * FROM v_portfolio_fraud_kpi;
--- SELECT * FROM v_fraud_7day_trend LIMIT 30;
--- SELECT * FROM v_velocity_anomalies LIMIT 50;
-
--- STEP 4: RUN ADVANCED QUERIES
--- SELECT * FROM mv_merchant_risk_dashboard ORDER BY fraud_rate_pct DESC;
--- SELECT * FROM v_fraud_temporal_heatmap;
--- SELECT * FROM v_fraud_rings LIMIT 20;
-
--- ============================================================================
--- QUICK REFERENCE: KEY VIEWS & FUNCTIONS
--- ============================================================================
--- 
--- Executive Dashboard:
---   SELECT * FROM v_portfolio_fraud_kpi;
--- 
--- Fraud Trends:
---   SELECT * FROM v_fraud_7day_trend ORDER BY txn_date DESC;
--- 
--- Velocity Anomalies:
---   SELECT * FROM v_velocity_anomalies ORDER BY txn_timestamp DESC LIMIT 50;
--- 
--- Fraud Rings:
---   SELECT * FROM v_fraud_rings ORDER BY connected_cards_count DESC;
--- 
--- Merchant Risk:
---   SELECT * FROM mv_merchant_risk_dashboard ORDER BY fraud_rate_pct DESC LIMIT 20;
--- 
--- Temporal Heatmap:
---   SELECT * FROM v_fraud_temporal_heatmap;
--- 
--- Risk Score Calculator:
---   SELECT * FROM calculate_transaction_risk_score(1, 1, 150.00, 'Electronics', 'US');
--- 
--- Card Risk Profile:
---   SELECT * FROM v_card_risk_profile ORDER BY fraud_txns DESC LIMIT 100;
--- 
--- ============================================================================
