@@ -1,31 +1,3 @@
-#!/usr/bin/env python3
-"""
-Load IEEE-CIS Fraud Detection CSV from GitHub into PostgreSQL
-
-Description:
-    This script downloads the fraud detection dataset from your GitHub repository
-    and loads it into PostgreSQL using the star schema designed in fraud_detection_complete.sql.
-    
-    Supports two modes:
-    1. Direct from GitHub raw URL
-    2. From local file
-
-Usage:
-    python3 load_fraud_data.py --source github  # Load from GitHub
-    python3 load_fraud_data.py --source local --file transactions.csv  # Load from local file
-    
-Prerequisites:
-    pip install psycopg2-binary pandas requests python-dotenv
-    
-Environment Variables:
-    DB_HOST: PostgreSQL host (default: localhost)
-    DB_PORT: PostgreSQL port (default: 5432)
-    DB_NAME: Database name (default: fraud_analytics)
-    DB_USER: PostgreSQL user (default: postgres)
-    DB_PASSWORD: PostgreSQL password (default: empty)
-    GITHUB_CSV_URL: GitHub raw CSV URL (optional if using --file)
-"""
-
 import psycopg2
 import pandas as pd
 import io
@@ -47,7 +19,7 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
-# Default GitHub raw CSV URL - UPDATE THIS WITH YOUR ACTUAL REPO
+
 GITHUB_CSV_URL = os.getenv(
     "GITHUB_CSV_URL",
     "https://raw.githubusercontent.com/AD9319/fraud-detection/main/transactions.csv"
@@ -77,9 +49,9 @@ class FraudDataLoader:
         try:
             self.conn = psycopg2.connect(**self.db_config)
             self.cursor = self.conn.cursor()
-            logger.info(f"✅ Connected to PostgreSQL: {self.db_config['host']}:{self.db_config['port']}/{self.db_config['database']}")
+            logger.info(f" Connected to PostgreSQL: {self.db_config['host']}:{self.db_config['port']}/{self.db_config['database']}")
         except psycopg2.Error as e:
-            logger.error(f"❌ Database connection failed: {e}")
+            logger.error(f" Database connection failed: {e}")
             raise
     
     def disconnect(self):
@@ -88,7 +60,7 @@ class FraudDataLoader:
             self.cursor.close()
         if self.conn:
             self.conn.close()
-        logger.info("✅ Database connection closed")
+        logger.info(" Database connection closed")
     
     def load_csv_from_github(self) -> pd.DataFrame:
         """
@@ -98,22 +70,22 @@ class FraudDataLoader:
             DataFrame with transaction data
         """
         try:
-            logger.info(f"📥 Downloading CSV from GitHub...")
+            logger.info(f" Downloading CSV from GitHub...")
             logger.info(f"   URL: {GITHUB_CSV_URL}")
             
             response = requests.get(GITHUB_CSV_URL, timeout=30)
             response.raise_for_status()
             
             df = pd.read_csv(io.StringIO(response.text))
-            logger.info(f"✅ Downloaded {len(df):,} records from GitHub")
+            logger.info(f" Downloaded {len(df):,} records from GitHub")
             
             return df
             
         except requests.RequestException as e:
-            logger.error(f"❌ Failed to download from GitHub: {e}")
+            logger.error(f" Failed to download from GitHub: {e}")
             raise
         except Exception as e:
-            logger.error(f"❌ Error parsing CSV: {e}")
+            logger.error(f" Error parsing CSV: {e}")
             raise
     
     def load_csv_from_file(self, file_path: str) -> pd.DataFrame:
@@ -131,15 +103,15 @@ class FraudDataLoader:
             if not path.exists():
                 raise FileNotFoundError(f"File not found: {file_path}")
             
-            logger.info(f"📂 Loading CSV from local file: {file_path}")
+            logger.info(f" Loading CSV from local file: {file_path}")
             
             df = pd.read_csv(file_path)
-            logger.info(f"✅ Loaded {len(df):,} records from {file_path}")
+            logger.info(f" Loaded {len(df):,} records from {file_path}")
             
             return df
             
         except Exception as e:
-            logger.error(f"❌ Error loading local file: {e}")
+            logger.error(f" Error loading local file: {e}")
             raise
     
     def validate_dataframe(self, df: pd.DataFrame):
@@ -159,7 +131,7 @@ class FraudDataLoader:
         if missing_cols:
             raise ValueError(f"Missing required columns: {missing_cols}")
         
-        logger.info(f"✅ DataFrame validation passed")
+        logger.info(f" DataFrame validation passed")
         logger.info(f"   Columns: {len(df.columns)}")
         logger.info(f"   Rows: {len(df):,}")
         logger.info(f"   Memory: {df.memory_usage(deep=True).sum() / 1e6:.2f} MB")
@@ -172,7 +144,7 @@ class FraudDataLoader:
             df: DataFrame to insert
         """
         try:
-            logger.info(f"🔄 Inserting {len(df):,} records into staging table...")
+            logger.info(f" Inserting {len(df):,} records into staging table...")
             
             # Clear existing staging data
             self.cursor.execute("DELETE FROM fraud_analytics.stg_raw_transactions;")
@@ -199,11 +171,11 @@ class FraudDataLoader:
                     logger.info(f"   Processed {i + batch_size:,} records...")
             
             self.conn.commit()
-            logger.info(f"✅ Inserted {self.cursor.rowcount:,} records into staging table")
+            logger.info(f" Inserted {self.cursor.rowcount:,} records into staging table")
             
         except psycopg2.Error as e:
             self.conn.rollback()
-            logger.error(f"❌ Insert to staging failed: {e}")
+            logger.error(f" Insert to staging failed: {e}")
             raise
     
     def transform_dimensions(self):
@@ -211,7 +183,7 @@ class FraudDataLoader:
         Transform staging data into dimension tables
         """
         try:
-            logger.info("🔄 Transforming data into dimension tables...")
+            logger.info(" Transforming data into dimension tables...")
             
             # Populate dim_cards
             logger.info("   Populating dim_cards...")
@@ -228,7 +200,7 @@ class FraudDataLoader:
                 FROM fraud_analytics.stg_raw_transactions
                 ON CONFLICT (card_hash) DO NOTHING;
             """)
-            logger.info(f"   ✅ Inserted {self.cursor.rowcount:,} unique cards")
+            logger.info(f"    Inserted {self.cursor.rowcount:,} unique cards")
             
             # Populate dim_identity
             logger.info("   Populating dim_identity...")
@@ -250,14 +222,14 @@ class FraudDataLoader:
                 FROM fraud_analytics.stg_raw_transactions
                 ON CONFLICT (device_info, ip_address, email_domain) DO NOTHING;
             """)
-            logger.info(f"   ✅ Inserted {self.cursor.rowcount:,} unique device fingerprints")
+            logger.info(f"    Inserted {self.cursor.rowcount:,} unique device fingerprints")
             
             self.conn.commit()
-            logger.info("✅ Dimension tables populated")
+            logger.info(" Dimension tables populated")
             
         except psycopg2.Error as e:
             self.conn.rollback()
-            logger.error(f"❌ Dimension transformation failed: {e}")
+            logger.error(f" Dimension transformation failed: {e}")
             raise
     
     def populate_facts(self):
@@ -265,7 +237,7 @@ class FraudDataLoader:
         Populate fact table by joining with dimensions
         """
         try:
-            logger.info("🔄 Populating fact_transactions table...")
+            logger.info(" Populating fact_transactions table...")
             
             self.cursor.execute("""
                 INSERT INTO fraud_analytics.fact_transactions 
@@ -292,11 +264,11 @@ class FraudDataLoader:
             """)
             
             self.conn.commit()
-            logger.info(f"✅ Inserted {self.cursor.rowcount:,} transactions into fact table")
+            logger.info(f" Inserted {self.cursor.rowcount:,} transactions into fact table")
             
         except psycopg2.Error as e:
             self.conn.rollback()
-            logger.error(f"❌ Fact table population failed: {e}")
+            logger.error(f" Fact table population failed: {e}")
             raise
     
     def validate_load(self):
@@ -304,7 +276,7 @@ class FraudDataLoader:
         Validate data quality and completeness
         """
         try:
-            logger.info("📊 Running data quality validation...")
+            logger.info(" Running data quality validation...")
             
             self.cursor.execute("""
                 SELECT 
@@ -318,7 +290,7 @@ class FraudDataLoader:
             
             result = self.cursor.fetchone()
             
-            logger.info("✅ Data Quality Report:")
+            logger.info(" Data Quality Report:")
             logger.info(f"   Total Transactions: {result[0]:,}")
             logger.info(f"   Fraud Transactions: {result[1]:,}")
             logger.info(f"   Fraud Rate: {result[2]:.3f}%")
@@ -326,7 +298,7 @@ class FraudDataLoader:
             logger.info(f"   Compromised Cards: {result[4]:,}")
             
         except psycopg2.Error as e:
-            logger.error(f"❌ Validation failed: {e}")
+            logger.error(f" Validation failed: {e}")
             raise
     
     def load_from_github(self):
@@ -346,10 +318,10 @@ class FraudDataLoader:
             # Validate results
             self.validate_load()
             
-            logger.info("🎉 Data load completed successfully!")
+            logger.info(" Data load completed successfully!")
             
         except Exception as e:
-            logger.error(f"❌ Load pipeline failed: {e}")
+            logger.error(f" Load pipeline failed: {e}")
             raise
         finally:
             self.disconnect()
@@ -374,7 +346,7 @@ class FraudDataLoader:
             logger.info("🎉 Data load completed successfully!")
             
         except Exception as e:
-            logger.error(f"❌ Load pipeline failed: {e}")
+            logger.error(f" Load pipeline failed: {e}")
             raise
         finally:
             self.disconnect()
